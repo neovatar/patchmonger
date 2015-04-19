@@ -21,7 +21,7 @@ Patchmonger can diff two directory structures and will check for the following:
   * Files removed
   * Files changed
 
-For changed files, patchmonger will create a xdelta3 based binary diff and compress it with LZMA. It will include a copy of itself in the patchset, which can be run to apply the patch.
+For changed files, patchmonger will create a xdelta3 based binary diff and compress it with LZMA. It will include a copy of itself in the patchset, which can be run later to apply the patch.
 
 ### Examples
 
@@ -38,7 +38,7 @@ drwxrwxr-x 64 tom tom      20480 Apr 18 14:44 ..
 -rw-rw-r--  1 tom tom 7064318981 Apr  8 09:28 gog_pillars_of_eternity_1.1.0.2.tar.gz
 ````
 
-Clone patchmonger:
+Clone patchmonger repository:
 
 ````
 git clone https://github.com/neovatar/patchmonger.git
