@@ -1,5 +1,19 @@
 #!/bin/bash
 
+# Copyright 2015 Thomas Seliger <neovatar@gmail.com>
+
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+
+#     http://www.apache.org/licenses/LICENSE-2.0
+
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 VERSION="0.1.0"
 
 function header {
@@ -15,17 +29,31 @@ function error {
   exit 1
 }
 
+function warn {
+  echo "WARNING: $1"
+}
+
 function usage {
   if [ "$1" != "" ]; then
     echo "USAGE ERROR: $1" 
+    echo
   fi
-  header
-  echo "Build a patch:"
-  echo "=============="
+  echo "Build a patchset:"
+  echo "================="
   echo "patchmonger create-patch OLDDIR NEWDIR PATCHDIR"
   echo
   echo "Build a patch from the old version of the game in OLDDIR to the"
   echo "new version in NEWDIR, assemble the patch in PATCHDIR."
+  echo
+  echo "Apply a patchset:"
+  echo "================="
+  echo "patchmonger [-f] [GAMEDIR]"
+  echo
+  echo "Looks for a patchset in the same directory as patchmonger and"
+  echo "applies it to the game installed in GAMEDIR, if GAMEDIR is not specified"
+  echo "patchmonger will ask for the game installation directory."
+  echo "To reapply a failed patch you can run patchmonger with the '-f' option,"
+  echo "this will ignore some errors (e.g. already existing files)."
   echo
   [ "$1" != "" ] && exit 1
   exit 0
@@ -34,43 +62,205 @@ function usage {
 function create-patch {
   OLD=$(readlink -f "$1")
   NEW=$(readlink -f "$2")
-  PATCH=$(readlink -f "$3")
-  PATCHDATA="$PATCH/pmdata"
+  PATCHDIR=$(readlink -f "$3")
+  PATCHNAME="$(basename $PATCHDIR)"
+  PATCHDATA="$PATCHDIR/$PATCHNAME/pmdata"
+  
 
-  [ -e "$PATCH" ] && error "Patch building directory $PATCH already exists!"
+  [ -e "$PATCHDIR" ] && error "Patch building directory $PATCHDIR already exists!"
   [ ! -e "$NEW" ] && error "New version directory $NEW does not exist!"
   [ ! -e "$OLD" ] && error "Old version directory $OLD does not exist!"
 
-  header
   echo "Building patch ..."
   mkdir -p "$PATCHDATA"
+
+  echo "Checking for deleted files ..."
+  pushd "$OLD" >/dev/null
+  while IFS= read -r -d '' FILE; do
+    FILE_DIR=$(dirname "$FILE")
+    if [ ! -e "$NEW/$FILE" ]; then
+      echo -n "d"
+      [ "$VERBOSE" ] && echo " Add removal of file $FILE to patchset"
+      mkdir -p "$PATCHDATA/$FILE_DIR"
+      touch "$PATCHDATA/$FILE.pmdel"
+      STATUS=$?
+      [ $STATUS -ne 0 ] && error "Cannot create $PATCHDATA/$FILE.pmdel"
+    fi
+  done < <(find . -type f -print0)
+  popd >/dev/null
+
+  echo
+  echo "Checking for patched or new files ..."
   pushd "$NEW" >/dev/null
   while IFS= read -r -d '' FILE; do
     FILE_DIR=$(dirname "$FILE")
     if [ ! -e "$OLD/$FILE" ]; then
-      echo "Adding new file $FILE"
+      echo -n "n"
+      [ "$VERBOSE" ] && echo " Adding new file $FILE"
       mkdir -p "$PATCHDATA/$FILE_DIR"
-      cp -p "$NEW/$FILE" "$PATCHDATA/$FILE.pmnew"
+      cp --preserve=mode "$NEW/$FILE" "$PATCHDATA/$FILE.pmnew"
+      STATUS=$?
+      [ $STATUS -ne 0 ] && error "Cannot create $PATCHDATA/$FILE.pmnew"
     else
       MD5_NEW=($(md5sum "$NEW/$FILE"))
       MD5_OLD=($(md5sum "$OLD/$FILE"))
       if [ "$MD5_OLD" != "$MD5_NEW" ]; then
-        echo "Creating xdelta3 diff for $FILE"
+        echo -n "p"
+        [ "$VERBOSE" ] && echo "Creating xdelta3 diff for $FILE"
         mkdir -p "$PATCHDATA/$FILE_DIR"
         xdelta3 -S lzma -s "$OLD/$FILE" "$NEW/$FILE" "$PATCHDATA/$FILE.pmdiff"
+        STATUS=$?
+        [ $STATUS -ne 0 ] && error "Cannot create $PATCHDATA/$FILE.pmdiff"
       fi
     fi
   done < <(find . -type f -print0)
   popd >/dev/null
 
-  cp -p "$SCRIPTDIR/patchmonger" "$PATCH"
+  echo
+  echo "Copying patchmonger to patch dir ..."
+  pushd "$PATCHDIR" >/dev/null
+  cp -p "$SCRIPTDIR/patchmonger" "$PATCHNAME"
+
+  echo "Creating patch tgz ..."
+  tar cfz "$PATCHNAME.tgz" "$PATCHNAME" && rm -rf "$PATCHNAME"
+  popd >/dev/null
+}
+
+function apply-patch {
+  echo -n "Looking for a patch ... "
+  SRC="$SCRIPTDIR/pmdata"
+  [ ! -e "$SRC" ] && usage "No $SCRIPTDIR/pmdata directory found, nothing to patch?"
+  echo "$SRC"
+
+  if [ -z "$1" ]; then
+    echo "Please enter your game installation directory:"
+    read DST
+    DST=$(readlink -f "$DST")
+  else
+    DST=$(readlink -f "$1")
+  fi
+  echo -n "Checking for game installation to patch ... "
+  [ ! -e "$DST" ] && error "Game installation directory $DST does not exist!"
+  echo "$DST"
+
+  echo -n "Checking for files that will be patched "
+  pushd "$SRC" >/dev/null
+  DOT_COUNTER=0
+  while IFS= read -r -d '' FILE; do
+    FILE_DIR=$(dirname "$FILE")
+    PATCH_TYPE=$(echo $FILE | sed 's/.*\.\(pmdiff\|pmdel\|pmnew\)$/\1/')
+    PATCH_FILENAME=$(echo $FILE | sed 's/\(.*\)\.\(pmdiff\|pmdel\|pmnew\)$/\1/')
+    case "$PATCH_TYPE" in
+      pmdiff)
+        if [ ! -e "$DST/$PATCH_FILENAME" ]; then
+          MSG="File $DST/$PATCH_FILENAME not found!"
+          echo
+          [ -z "$FORCE" ] && error "$MSG"
+          warn "$MSG"
+        fi
+      ;;
+      pmnew)
+        if [ -e "$DST/$PATCH_FILENAME" ]; then
+          MSG="File $DST/$PATCH_FILENAME already exists!"
+          echo
+          [ -z "$FORCE" ] && error "$MSG"
+          warn "$MSG"
+        fi
+      ;;
+    esac
+    if [ $DOT_COUNTER -lt 100 ]; then
+      DOT_COUNTER=$(($DOT_COUNTER + 1))
+    else
+      echo -n "."
+      DOT_COUNTER=0
+    fi
+  done < <(find . -type f \( -name \*.pmdiff -o -name \*.pmdel -o -name \*.pmnew \) -print0)
+  echo "ok"
+  popd >/dev/null
+
+  echo -n "Applying update diffs, new files and deletes ..."
+  pushd "$SRC" >/dev/null
+  while IFS= read -r -d '' FILE; do
+    FILE_DIR=$(dirname "$FILE")
+    PATCH_TYPE=$(echo $FILE | sed 's/.*\.\(pmdiff\|pmdel\|pmnew\)$/\1/')
+    PATCH_FILENAME=$(echo $FILE | sed 's/\(.*\)\.\(pmdiff\|pmdel\|pmnew\)$/\1/')
+    case "$PATCH_TYPE" in
+      pmdiff)
+        echo -n "p"
+        [ "$VERBOSE" ] && echo "Applying diff to $DST/$PATCH_FILENAME"
+        xdelta3 -d -s "$DST/$PATCH_FILENAME" "$SRC/$FILE" "$DST/$PATCH_FILENAME.patched"
+        STATUS=$?
+        if [ $STATUS -ne 0 ]; then
+          MSG="Cannot apply xdelta patch to $DST/$PATCH_FILENAME"
+          echo
+          [ -z "$FORCE" ] && error "$MSG"
+          warn "$MSG"
+        else
+          mv "$DST/$PATCH_FILENAME.patched" "$DST/$PATCH_FILENAME" 
+        fi
+      ;;
+      pmnew)
+        echo -n "n"
+        [ "$VERBOSE" ] && echo "Adding new file $DST/$PATCH_FILENAME"
+        mkdir -p "$DST/$FILE_DIR"
+        cp --preserve=mode "$FILE" "$DST/$PATCH_FILENAME"
+        STATUS=$?
+        if [ $STATUS -ne 0 ]; then
+          MSG="Cannot add new file $DST/$PATCH_FILENAME"
+          echo
+          [ -z "$FORCE" ] && error "$MSG"
+          warn "$MSG"
+        fi
+      ;;
+      pmdel)
+        echo -n "d"
+        [ "$VERBOSE" ] && echo "Removing file $DST/$PATCH_FILENAME"
+        rm -f "$DST/$PATCH_FILENAME"
+        if [ $STATUS -ne 0 ]; then
+          MSG="Cannot delete file $DST/$PATCH_FILENAME"
+          echo
+          warn "$MSG"
+        fi
+      ;;
+    esac
+  done < <(find . -type f \( -name \*.pmdiff -o -name \*.pmdel -o -name \*.pmnew \) -print0)
+  echo "Finished!"
+  popd >/dev/null
 }
 
 CMD=$1
 SCRIPTDIR=$(dirname $(readlink -f $0))
+header
 
+FORCE=""
+VERBOSE=""
+
+# check for options
+while getopts "::f" Option
+do
+  case $Option in
+    f)
+      FORCE="yes"
+    ;;
+    v)
+      VERBOSE="yes"
+    ;;
+    *)
+      usage "Unimplemented option chosen."
+    ;;
+  esac
+done
+shift $(($OPTIND - 1))
+
+# check for xdelta3
+XDELTA_INFO=$(xdelta3 --help 2>&1 | grep lzma)
+[ -z "$XDELTA_INFO" ] && error "Please install xdelta3 with LZMA support (e.g. 'sudo apt-get install xdelta3')"
+
+# execute command
 if [ "$CMD" = "create-patch" ]; then
   shift
   [ $# -lt 3 ] && usage "create-patch needs three arguments"
   create-patch "$1" "$2" "$3"
+else
+  apply-patch "$1"
 fi
