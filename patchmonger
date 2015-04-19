@@ -237,6 +237,7 @@ function apply-patch {
 
 FORCE=""
 VERBOSE=""
+header
 
 # check for options
 while getopts "::fv" Option
@@ -257,7 +258,6 @@ done
 
 CMD=$1
 SCRIPTDIR=$(dirname $(readlink -f $0))
-header
 
 # check for xdelta3
 XDELTA_INFO=$(xdelta3 --help 2>&1 | grep lzma)
