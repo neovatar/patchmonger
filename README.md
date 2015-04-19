@@ -27,7 +27,7 @@ For changed files, patchmonger will create a xdelta3 based binary diff and compr
 
 #### Creating a patch
 
-Download the two GOG game installer tgz files (e.g. forPillars of Eternity):
+Download the two GOG game installer tgz files (e.g. Pillars of Eternity):
 
 ````
 ls -al ~/Downloads/poe/
