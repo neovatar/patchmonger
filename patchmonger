@@ -40,20 +40,22 @@ function usage {
   fi
   echo "Build a patchset:"
   echo "================="
-  echo "patchmonger create-patch OLDDIR NEWDIR PATCHDIR"
+  echo "patchmonger [-v] create-patch OLDDIR NEWDIR PATCHDIR"
   echo
   echo "Build a patch from the old version of the game in OLDDIR to the"
   echo "new version in NEWDIR, assemble the patch in PATCHDIR."
   echo
   echo "Apply a patchset:"
   echo "================="
-  echo "patchmonger [-f] [GAMEDIR]"
+  echo "patchmonger [-v] [-f] [GAMEDIR]"
   echo
   echo "Looks for a patchset in the same directory as patchmonger and"
   echo "applies it to the game installed in GAMEDIR, if GAMEDIR is not specified"
   echo "patchmonger will ask for the game installation directory."
   echo "To reapply a failed patch you can run patchmonger with the '-f' option,"
   echo "this will ignore some errors (e.g. already existing files)."
+  echo
+  echo "You can use '-v' option for a more verbose output."
   echo
   [ "$1" != "" ] && exit 1
   exit 0
@@ -135,6 +137,7 @@ function apply-patch {
   if [ -z "$1" ]; then
     echo "Please enter your game installation directory:"
     read DST
+    DST="${DST/#\~/$HOME}"
     DST=$(readlink -f "$DST")
   else
     DST=$(readlink -f "$1")
@@ -178,7 +181,7 @@ function apply-patch {
   echo "ok"
   popd >/dev/null
 
-  echo -n "Applying update diffs, new files and deletes ..."
+  echo -n "Applying patch diffs, new files and deletes ... "
   pushd "$SRC" >/dev/null
   while IFS= read -r -d '' FILE; do
     FILE_DIR=$(dirname "$FILE")
@@ -216,6 +219,7 @@ function apply-patch {
         echo -n "d"
         [ "$VERBOSE" ] && echo "Removing file $DST/$PATCH_FILENAME"
         rm -f "$DST/$PATCH_FILENAME"
+        STATUS=$?
         if [ $STATUS -ne 0 ]; then
           MSG="Cannot delete file $DST/$PATCH_FILENAME"
           echo
@@ -224,19 +228,16 @@ function apply-patch {
       ;;
     esac
   done < <(find . -type f \( -name \*.pmdiff -o -name \*.pmdel -o -name \*.pmnew \) -print0)
+  echo
   echo "Finished!"
   popd >/dev/null
 }
-
-CMD=$1
-SCRIPTDIR=$(dirname $(readlink -f $0))
-header
 
 FORCE=""
 VERBOSE=""
 
 # check for options
-while getopts "::f" Option
+while getopts "::fv" Option
 do
   case $Option in
     f)
@@ -249,8 +250,12 @@ do
       usage "Unimplemented option chosen."
     ;;
   esac
+  shift $((OPTIND-1))
 done
-shift $(($OPTIND - 1))
+
+CMD=$1
+SCRIPTDIR=$(dirname $(readlink -f $0))
+header
 
 # check for xdelta3
 XDELTA_INFO=$(xdelta3 --help 2>&1 | grep lzma)
