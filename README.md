@@ -116,7 +116,7 @@ You can also specify the installation directory of the game that you want to pat
 ./patchmonger "/home/tom/Data/games/Pillars of Eternity"
 ````
 
-#### Special command line arguments
+#### Special command line options
 
 **`-f`** Turns some errors to warnings when applying a patch, use with caution.
 
