@@ -1,0 +1,76 @@
+#!/bin/bash
+
+VERSION="0.1.0"
+
+function header {
+  echo "                                "
+  echo " _  _ |_ _|_  _  _  _  _  _ _ "
+  echo "|_)(_||_(_| )|||(_)| )(_)(-|  "
+  echo "|                     _/v$VERSION"
+  echo
+}
+
+function error {
+  echo "ERROR: $1"
+  exit 1
+}
+
+function usage {
+  if [ "$1" != "" ]; then
+    echo "USAGE ERROR: $1" 
+  fi
+  header
+  echo "Build a patch:"
+  echo "=============="
+  echo "patchmonger create-patch OLDDIR NEWDIR PATCHDIR"
+  echo
+  echo "Build a patch from the old version of the game in OLDDIR to the"
+  echo "new version in NEWDIR, assemble the patch in PATCHDIR."
+  echo
+  [ "$1" != "" ] && exit 1
+  exit 0
+}
+
+function create-patch {
+  OLD=$(readlink -f "$1")
+  NEW=$(readlink -f "$2")
+  PATCH=$(readlink -f "$3")
+  PATCHDATA="$PATCH/pmdata"
+
+  [ -e "$PATCH" ] && error "Patch building directory $PATCH already exists!"
+  [ ! -e "$NEW" ] && error "New version directory $NEW does not exist!"
+  [ ! -e "$OLD" ] && error "Old version directory $OLD does not exist!"
+
+  header
+  echo "Building patch ..."
+  mkdir -p "$PATCHDATA"
+  pushd "$NEW" >/dev/null
+  while IFS= read -r -d '' FILE; do
+    FILE_DIR=$(dirname "$FILE")
+    if [ ! -e "$OLD/$FILE" ]; then
+      echo "Adding new file $FILE"
+      mkdir -p "$PATCHDATA/$FILE_DIR"
+      cp -p "$NEW/$FILE" "$PATCHDATA/$FILE.pmnew"
+    else
+      MD5_NEW=($(md5sum "$NEW/$FILE"))
+      MD5_OLD=($(md5sum "$OLD/$FILE"))
+      if [ "$MD5_OLD" != "$MD5_NEW" ]; then
+        echo "Creating xdelta3 diff for $FILE"
+        mkdir -p "$PATCHDATA/$FILE_DIR"
+        xdelta3 -S lzma -s "$OLD/$FILE" "$NEW/$FILE" "$PATCHDATA/$FILE.pmdiff"
+      fi
+    fi
+  done < <(find . -type f -print0)
+  popd >/dev/null
+
+  cp -p "$SCRIPTDIR/patchmonger" "$PATCH"
+}
+
+CMD=$1
+SCRIPTDIR=$(dirname $(readlink -f $0))
+
+if [ "$CMD" = "create-patch" ]; then
+  shift
+  [ $# -lt 3 ] && usage "create-patch needs three arguments"
+  create-patch "$1" "$2" "$3"
+fi
