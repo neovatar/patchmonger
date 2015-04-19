@@ -119,4 +119,5 @@ You can also specify the installation directory of the game that you want to pat
 #### Special command line arguments
 
 **`-f`** Turns some errors to warnings when applying a patch, use with caution.
+
 **`-v`** Gives more verbose output.
