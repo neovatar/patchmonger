@@ -118,6 +118,7 @@ You can also specify the installation directory of the game that you want to pat
 
 #### Special command line options
 
-**`-f`** Turns some errors to warnings when applying a patch, use with caution.
-
+**`-f`** Turns some errors to warnings when applying a patch, only use this with caution!
 **`-v`** Gives more verbose output.
+**`-n`** Do not create rollback information, only use this with caution!
+**`-k`** Keep rollback information for later use.

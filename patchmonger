@@ -14,7 +14,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-VERSION="0.2.0"
+VERSION="0.2.1"
+FORCE=""
+VERBOSE=""
+ROLLBACK="yes"
+KEEP_ROLLBACK=""
+SCRIPTDIR=$(dirname $(readlink -f $0))
+ROLLBACKDIR="$SCRIPTDIR/rollback-$(date +%Y%m%d%H%M)"
 
 function header {
   echo "                                "
@@ -47,15 +53,17 @@ function usage {
   echo
   echo "Apply a patchset:"
   echo "================="
-  echo "patchmonger [-v] [-f] [GAMEDIR]"
+  echo "patchmonger [-v] [-f] [-n] [-k] [GAMEDIR]"
   echo
   echo "Looks for a patchset in the same directory as patchmonger and"
   echo "applies it to the game installed in GAMEDIR, if GAMEDIR is not specified"
   echo "patchmonger will ask for the game installation directory."
-  echo "To reapply a failed patch you can run patchmonger with the '-f' option,"
-  echo "this will ignore some errors (e.g. already existing files)."
   echo
-  echo "You can use '-v' option for a more verbose output."
+  echo "Options:"
+  echo "-v  more verbose output."
+  echo "-f  turn some errors into warnings, only use this with caution!"
+  echo "-n  do not create rollback information, only use this with caution!"
+  echo "-k  keep rollback information for later use"
   echo
   [ "$1" != "" ] && exit 1
   exit 0
@@ -145,7 +153,8 @@ function create-patch {
 }
 
 function check-patch {
-  DST=$1
+  SRC=$1
+  DST=$2
 
   echo
   echo "Checking for game installation to patch ... "
@@ -153,7 +162,7 @@ function check-patch {
   echo "$DST"
 
   echo
-  echo "Checking for files that will be patched or created ..."
+  echo "Checking patchset and creating rollback information ..."
   pushd "$SRC" >/dev/null
   NEW_COUNT=0
   PATCH_COUNT=0
@@ -162,6 +171,7 @@ function check-patch {
     FILE_DIR=$(dirname "$FILE")
     PATCH_TYPE=$(echo $FILE | sed 's/.*\.\(pmdiff\|pmdel\|pmnew\|pmnewdiff\)$/\1/')
     PATCH_FILENAME=$(echo $FILE | sed 's/\(.*\)\.\(pmdiff\|pmdel\|pmnew\|pmnewdiff\)$/\1/')
+    [ "$ROLLBACK" ] && mkdir -p "$ROLLBACKDIR/$FILE_DIR"
     case "$PATCH_TYPE" in
       pmdiff)
         PATCH_COUNT=$(( PATCH_COUNT + 1 ))
@@ -171,6 +181,7 @@ function check-patch {
           [ -z "$FORCE" ] && error "$MSG"
           warn "$MSG"
         fi
+        [ "$ROLLBACK" ] && cp -p "$DST/$PATCH_FILENAME" "$ROLLBACKDIR/$PATCH_FILENAME.pmbackup"
       ;;
       pmnewdiff)
         NEW_COUNT=$(( NEW_COUNT + 1 ))
@@ -180,6 +191,7 @@ function check-patch {
           [ -z "$FORCE" ] && error "$MSG"
           warn "$MSG"
         fi
+        [ "$ROLLBACK" ] && touch "$ROLLBACKDIR/$PATCH_FILENAME.pmdel"
       ;;
       pmnew)
         NEW_COUNT=$(( NEW_COUNT + 1 ))
@@ -189,12 +201,83 @@ function check-patch {
           [ -z "$FORCE" ] && error "$MSG"
           warn "$MSG"
         fi
+        [ "$ROLLBACK" ] && touch "$ROLLBACKDIR/$PATCH_FILENAME.pmdel"
+      ;;
+      pmdel)
+        DEL_COUNT=$(( DEL_COUNT + 1 ))
+        if [ ! -e "$DST/$PATCH_FILENAME" ]; then
+          MSG="File $DST/$PATCH_FILENAME not found!"
+          echo
+          [ -z "$FORCE" ] && error "$MSG"
+          warn "$MSG"
+        fi
+        [ "$ROLLBACK" ] && cp -p "$DST/$PATCH_FILENAME" "$ROLLBACKDIR/$PATCH_FILENAME.pmbackup"
       ;;
     esac
-    printf "patched: $PATCH_COUNT, new: $NEW_COUNT\r"
+    printf "patched: $PATCH_COUNT, new: $NEW_COUNT, deleted: $DEL_COUNT\r"
   done < <(find . -type f \( -name \*.pmdiff -o -name \*.pmdel -o -name \*.pmnew -o -name \*.pmnewdiff \) -print0)
   echo
   popd >/dev/null
+}
+
+function cleanup-rollbackdir {
+  if [ "$ROLLBACK" ] && [ -e "$ROLLBACKDIR" ] && [ -z "$KEEP_ROLLBACK" ]; then
+    rm -rf "$ROLLBACKDIR"
+  fi
+}
+
+function rollback-patch {
+  DST=$1
+  ROLLBACKOK="yes"
+
+  echo
+  echo "ERROR: Error detected, attempting rollback ..."
+  if [ -z "$ROLLBACK" ]; then
+    echo "Rollback disabled, nothing to do!"
+  elif [ ! -e "$ROLLBACKDIR" ]; then
+    echo "Game installation directory $ROLLBACKDIR does not exist, nothing to do!"
+  else
+    echo
+    echo "Rollback modified files ..."
+    pushd "$ROLLBACKDIR" >/dev/null
+    REVERT_COUNT=0
+    DEL_COUNT=0
+    while IFS= read -r -d '' FILE; do
+      FILE_DIR=$(dirname "$FILE")
+      PATCH_TYPE=$(echo $FILE | sed 's/.*\.\(pmbackup\|pmdel\)$/\1/')
+      PATCH_FILENAME=$(echo $FILE | sed 's/\(.*\)\.\(pmbackup\|pmdel\)$/\1/')
+      case "$PATCH_TYPE" in
+        pmbackup)
+          REVERT_COUNT=$(( REVERT_COUNT + 1 ))
+          cp -p "$ROLLBACKDIR/$FILE" "$DST/$PATCH_FILENAME"
+          STATUS=$?
+          if [ $STATUS -ne 0 ]; then
+            echo "Cannot revert $DST/$PATCH_FILENAME to $ROLLBACKDIR/$FILE"
+            ROLLBACKOK="no"
+          fi
+        ;;
+        pmdel)
+          DEL_COUNT=$(( DEL_COUNT + 1 ))
+          rm "$DST/$PATCH_FILENAME"
+          STATUS=$?
+          if [ $STATUS -ne 0 ]; then
+            echo "Cannot delete $DST/$PATCH_FILENAME"
+            ROLLBACKOK="no"
+          fi
+        ;;
+      esac
+      printf "reverted: $REVERT_COUNT, deleted: $DEL_COUNT\r"
+    done < <(find . -type f \( -name \*.pmbackup -o -name \*.pmdel \) -print0)
+    echo
+    if [ "$ROLLBACKOK" = "yes" ]; then
+      echo "Rollback ok."
+      cleanup-rollbackdir
+    else
+      echo "ERROR: Rollback failed!"
+    fi
+    echo
+    popd >/dev/null
+  fi
 }
 
 function apply-patch {
@@ -212,7 +295,7 @@ function apply-patch {
     DST=$(readlink -f "$1")
   fi
 
-  check-patch "$DST"
+  check-patch "$SRC" "$DST" 
 
   echo
   echo "Applying patch diffs, new files and deletes ... "
@@ -233,7 +316,7 @@ function apply-patch {
         if [ $STATUS -ne 0 ]; then
           MSG="Cannot apply xdelta patch to $DST/$PATCH_FILENAME"
           echo
-          [ -z "$FORCE" ] && error "$MSG"
+          [ -z "$FORCE" ] && rollback-patch "$DST" && error "$MSG"
           warn "$MSG"
         else
           PATCH_FILEPERM=$(stat -c "%a" "$DST/$PATCH_FILENAME")
@@ -251,7 +334,7 @@ function apply-patch {
         if [ $STATUS -ne 0 ]; then
           MSG="Cannot apply xdelta patch to $DST/$PATCH_FILENAME"
           echo
-          [ -z "$FORCE" ] && error "$MSG"
+          [ -z "$FORCE" ] && rollback-patch "$DST" && error "$MSG"
           warn "$MSG"
         else
           PATCH_FILEPERM=$(stat -c "%a" "$SRC/$FILE")
@@ -268,7 +351,7 @@ function apply-patch {
         if [ $STATUS -ne 0 ]; then
           MSG="Cannot add new file $DST/$PATCH_FILENAME"
           echo
-          [ -z "$FORCE" ] && error "$MSG"
+          [ -z "$FORCE" ] && rollback-patch "$DST" && error "$MSG"
           warn "$MSG"
         fi
       ;;
@@ -293,12 +376,10 @@ function apply-patch {
   echo "Finished!"
 }
 
-FORCE=""
-VERBOSE=""
 header
 
 # check for options
-while getopts "::fv" Option
+while getopts "::fvnk" Option
 do
   case $Option in
     f)
@@ -307,15 +388,20 @@ do
     v)
       VERBOSE="yes"
     ;;
+    n)
+      ROLLBACK=""
+    ;;
+    k)
+      KEEP_ROLLBACK="yes"
+    ;;
     *)
       usage "Unimplemented option chosen."
     ;;
   esac
-  shift $((OPTIND-1))
 done
-
+shift $((OPTIND-1))
 CMD=$1
-SCRIPTDIR=$(dirname $(readlink -f $0))
+
 
 # check for xdelta3
 XDELTA_INFO=$(xdelta3 --help 2>&1 | grep lzma)
