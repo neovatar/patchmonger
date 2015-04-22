@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 FORCE=""
 VERBOSE=""
 ROLLBACK="yes"
@@ -152,74 +152,6 @@ function create-patch {
   echo "Finished!"
 }
 
-function check-patch {
-  SRC=$1
-  DST=$2
-
-  echo
-  echo "Checking for game installation to patch ... "
-  [ ! -e "$DST" ] && error "Game installation directory $DST does not exist!"
-  echo "$DST"
-
-  echo
-  echo "Checking patchset and creating rollback information ..."
-  pushd "$SRC" >/dev/null
-  NEW_COUNT=0
-  PATCH_COUNT=0
-  DEL_COUNT=0
-  while IFS= read -r -d '' FILE; do
-    FILE_DIR=$(dirname "$FILE")
-    PATCH_TYPE=$(echo $FILE | sed 's/.*\.\(pmdiff\|pmdel\|pmnew\|pmnewdiff\)$/\1/')
-    PATCH_FILENAME=$(echo $FILE | sed 's/\(.*\)\.\(pmdiff\|pmdel\|pmnew\|pmnewdiff\)$/\1/')
-    [ "$ROLLBACK" ] && mkdir -p "$ROLLBACKDIR/$FILE_DIR"
-    case "$PATCH_TYPE" in
-      pmdiff)
-        PATCH_COUNT=$(( PATCH_COUNT + 1 ))
-        if [ ! -e "$DST/$PATCH_FILENAME" ]; then
-          MSG="File $DST/$PATCH_FILENAME not found!"
-          echo
-          [ -z "$FORCE" ] && error "$MSG"
-          warn "$MSG"
-        fi
-        [ "$ROLLBACK" ] && cp -p "$DST/$PATCH_FILENAME" "$ROLLBACKDIR/$PATCH_FILENAME.pmbackup"
-      ;;
-      pmnewdiff)
-        NEW_COUNT=$(( NEW_COUNT + 1 ))
-        if [ -e "$DST/$PATCH_FILENAME" ]; then
-          MSG="File $DST/$PATCH_FILENAME already exists!"
-          echo
-          [ -z "$FORCE" ] && error "$MSG"
-          warn "$MSG"
-        fi
-        [ "$ROLLBACK" ] && touch "$ROLLBACKDIR/$PATCH_FILENAME.pmdel"
-      ;;
-      pmnew)
-        NEW_COUNT=$(( NEW_COUNT + 1 ))
-        if [ -e "$DST/$PATCH_FILENAME" ]; then
-          MSG="File $DST/$PATCH_FILENAME already exists!"
-          echo
-          [ -z "$FORCE" ] && error "$MSG"
-          warn "$MSG"
-        fi
-        [ "$ROLLBACK" ] && touch "$ROLLBACKDIR/$PATCH_FILENAME.pmdel"
-      ;;
-      pmdel)
-        DEL_COUNT=$(( DEL_COUNT + 1 ))
-        if [ ! -e "$DST/$PATCH_FILENAME" ]; then
-          MSG="File $DST/$PATCH_FILENAME not found!"
-          echo
-          [ -z "$FORCE" ] && error "$MSG"
-          warn "$MSG"
-        fi
-        [ "$ROLLBACK" ] && cp -p "$DST/$PATCH_FILENAME" "$ROLLBACKDIR/$PATCH_FILENAME.pmbackup"
-      ;;
-    esac
-    printf "patched: $PATCH_COUNT, new: $NEW_COUNT, deleted: $DEL_COUNT\r"
-  done < <(find . -type f \( -name \*.pmdiff -o -name \*.pmdel -o -name \*.pmnew -o -name \*.pmnewdiff \) -print0)
-  echo
-  popd >/dev/null
-}
-
 function cleanup-rollbackdir {
   if [ "$ROLLBACK" ] && [ -e "$ROLLBACKDIR" ] && [ -z "$KEEP_ROLLBACK" ]; then
     rm -rf "$ROLLBACKDIR"
@@ -295,7 +227,10 @@ function apply-patch {
     DST=$(readlink -f "$1")
   fi
 
-  check-patch "$SRC" "$DST" 
+  echo
+  echo "Checking for game installation to patch ... "
+  [ ! -e "$DST" ] && error "Game installation directory $DST does not exist!"
+  echo "$DST"
 
   echo
   echo "Applying patch diffs, new files and deletes ... "
@@ -307,9 +242,12 @@ function apply-patch {
     FILE_DIR=$(dirname "$FILE")
     PATCH_TYPE=$(echo $FILE | sed 's/.*\.\(pmdiff\|pmdel\|pmnew\|pmnewdiff\)$/\1/')
     PATCH_FILENAME=$(echo $FILE | sed 's/\(.*\)\.\(pmdiff\|pmdel\|pmnew\|pmnewdiff\)$/\1/')
+    mkdir -p "$DST/$FILE_DIR"
+    [ "$ROLLBACK" ] && mkdir -p "$ROLLBACKDIR/$FILE_DIR"
     case "$PATCH_TYPE" in
       pmdiff)
         PATCH_COUNT=$(( PATCH_COUNT + 1 ))
+        [ "$ROLLBACK" ] && cp -p "$DST/$PATCH_FILENAME" "$ROLLBACKDIR/$PATCH_FILENAME.pmbackup"
         [ "$VERBOSE" ] && echo "Applying diff to $DST/$PATCH_FILENAME"
         xdelta3 -D -R -d -s "$DST/$PATCH_FILENAME" "$SRC/$FILE" "$DST/$PATCH_FILENAME.patched"
         STATUS=$?
@@ -326,6 +264,7 @@ function apply-patch {
       ;;
       pmnewdiff)
         NEW_COUNT=$(( NEW_COUNT + 1 ))
+        [ "$ROLLBACK" ] && touch "$ROLLBACKDIR/$PATCH_FILENAME.pmdel"
         [ "$VERBOSE" ] && echo "Generating new file from diff $DST/$PATCH_FILENAME"
         rm -f "$DST/$PATCH_FILENAME"
         touch "$DST/$PATCH_FILENAME"
@@ -342,21 +281,9 @@ function apply-patch {
           chmod "$PATCH_FILEPERM" "$DST/$PATCH_FILENAME"
         fi
       ;;
-      pmnew)
-        NEW_COUNT=$(( NEW_COUNT + 1 ))
-        [ "$VERBOSE" ] && echo "Adding new file $DST/$PATCH_FILENAME"
-        mkdir -p "$DST/$FILE_DIR"
-        cp --preserve=mode "$FILE" "$DST/$PATCH_FILENAME"
-        STATUS=$?
-        if [ $STATUS -ne 0 ]; then
-          MSG="Cannot add new file $DST/$PATCH_FILENAME"
-          echo
-          [ -z "$FORCE" ] && rollback-patch "$DST" && error "$MSG"
-          warn "$MSG"
-        fi
-      ;;
       pmdel)
         DEL_COUNT=$(( DEL_COUNT + 1 ))
+        [ "$ROLLBACK" ] && cp -p "$DST/$PATCH_FILENAME" "$ROLLBACKDIR/$PATCH_FILENAME.pmbackup"
         [ "$VERBOSE" ] && echo "Removing file $DST/$PATCH_FILENAME"
         rm -f "$DST/$PATCH_FILENAME"
         STATUS=$?
