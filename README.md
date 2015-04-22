@@ -21,7 +21,9 @@ Patchmonger can diff two directory structures and will check for the following:
   * Files removed
   * Files changed
 
-For changed files, patchmonger will create a xdelta3 based binary diff and compress it with LZMA. It will include a copy of itself in the patchset, which can be run later to apply the patch.
+For changed and new files, patchmonger will create a xdelta3 based binary diff and compress it with LZMA. It will include a copy of itself in the patchset, which can be run later to apply the patch.
+
+Patchmonger will save rollback information before changing files and tries to rollback the patch changes if an error occurs.
 
 ### Examples
 
@@ -118,6 +120,10 @@ You can also specify the installation directory of the game that you want to pat
 
 #### Special command line options
 
-**`-f`** Turns some errors to warnings when applying a patch, use with caution.
-
 **`-v`** Gives more verbose output.
+
+**`-k`** Keep rollback information for later use.
+
+**`-f`** Turns some errors to warnings when applying a patch, only use this with caution!
+
+**`-n`** Do not create rollback information, only use this with caution!
