@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-VERSION="0.2.2"
+VERSION="0.2.3"
 FORCE=""
 VERBOSE=""
 ROLLBACK="yes"
@@ -51,20 +51,29 @@ function usage {
   echo "Build a patch from the old version of the game in OLDDIR to the"
   echo "new version in NEWDIR, assemble the patch in PATCHDIR."
   echo
+  echo "Rollback a patchset:"
+  echo "===================="
+  echo "patchmonger [-v] rollback-patch ROLLBACKDIR GAMEDIR"
+  echo
+  echo "Applies the rollback information in directory ROLLBACKDIR"
+  echo "to GAMEDIR. Normally this is used internally to rollback"
+  echo "on failed patches, and does no need to be called manually."
+  echo
   echo "Apply a patchset:"
   echo "================="
   echo "patchmonger [-v] [-f] [-n] [-k] [GAMEDIR]"
   echo
   echo "Looks for a patchset in the same directory as patchmonger and"
-  echo "applies it to the game installed in GAMEDIR, if GAMEDIR is not specified"
-  echo "patchmonger will ask for the game installation directory."
+  echo "applies it to the game installed in GAMEDIR, if GAMEDIR is"
+  echo "not specified patchmonger will ask for the game installation directory."
   echo
   echo "Options:"
   echo "-v  more verbose output."
+  echo "-k  keep rollback information for later use (with rollback-patch)"
   echo "-f  turn some errors into warnings, only use this with caution!"
   echo "-n  do not create rollback information, only use this with caution!"
-  echo "-k  keep rollback information for later use"
   echo
+
   [ "$1" != "" ] && exit 1
   exit 0
 }
@@ -159,8 +168,13 @@ function cleanup-rollbackdir {
 }
 
 function rollback-patch {
-  DST=$1
+  DST=$(readlink -f "$1")
   ROLLBACKOK="yes"
+
+  echo
+  echo "Checking for game installation to patch ... "
+  [ ! -e "$DST" ] && error "Game installation directory $DST does not exist!"
+  echo "$DST"
 
   echo
   echo "ERROR: Error detected, attempting rollback ..."
@@ -335,10 +349,20 @@ XDELTA_INFO=$(xdelta3 --help 2>&1 | grep lzma)
 [ -z "$XDELTA_INFO" ] && error "Please install xdelta3 with LZMA support (e.g. 'sudo apt-get install xdelta3')"
 
 # execute command
-if [ "$CMD" = "create-patch" ]; then
-  shift
-  [ $# -lt 3 ] && usage "create-patch needs three arguments"
-  create-patch "$1" "$2" "$3"
-else
-  apply-patch "$1"
-fi
+case "$CMD" in
+  "create-patch")
+    shift
+    [ $# -lt 3 ] && usage "create-patch needs three arguments."
+    create-patch "$1" "$2" "$3"
+  ;;
+  "rollback-patch")
+    shift
+    [ $# -lt 2 ] && usage "rollback-patch needs two arguments."
+    KEEP_ROLLBACK="yes"
+    ROLLBACKDIR=$(readlink -f "$1")
+    rollback-patch "$2"
+  ;;
+  *)
+    apply-patch "$1"
+  ;;
+esac
