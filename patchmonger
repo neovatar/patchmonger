@@ -151,6 +151,7 @@ function create-patch {
   echo "Copying patchmonger to patch dir ..."
   pushd "$PATCHDIR" >/dev/null
   cp -p "$SCRIPTDIR/patchmonger" "$PATCHNAME"
+  cp -p "$SCRIPTDIR/README.md" "$PATCHNAME/patchmonger-README.md"
 
   echo
   echo "Creating patch tgz ..."
