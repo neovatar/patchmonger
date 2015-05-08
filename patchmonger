@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-VERSION="0.2.3"
+VERSION="0.2.4"
 FORCE=""
 VERBOSE=""
 ROLLBACK="yes"
@@ -345,8 +345,10 @@ shift $((OPTIND-1))
 CMD=$1
 
 
-# check for xdelta3
+# check for xdelta3 with lzma in --help (ubuntu)
 XDELTA_INFO=$(xdelta3 --help 2>&1 | grep lzma)
+# check for xdelta with lzma in --config
+[ -z "$XDELTA_INFO" ] && XDELTA_INFO=$(xdelta3 config 2>&1 | grep SECONDARY_LZMA=1)
 [ -z "$XDELTA_INFO" ] && error "Please install xdelta3 with LZMA support (e.g. 'sudo apt-get install xdelta3')"
 
 # execute command
