@@ -346,7 +346,7 @@ CMD=$1
 
 
 # check for xdelta3
-XDELTA_INFO=$(xdelta3 --help 2>&1 | grep lzma)
+XDELTA_INFO=$(xdelta3 config 2>&1 | grep SECONDARY_LZMA=1)
 [ -z "$XDELTA_INFO" ] && error "Please install xdelta3 with LZMA support (e.g. 'sudo apt-get install xdelta3')"
 
 # execute command
